@@ -11,6 +11,7 @@ from sse_starlette.sse import EventSourceResponse
 import asyncio
 import re
 from dotenv import load_dotenv
+from image_search_tool import ImageSearchTool
 
 load_dotenv(dotenv_path="/app/.env")
 
@@ -87,35 +88,27 @@ def hero_details(name: str = Query(..., description="Name of the hero")):
         openai_api_key=os.getenv("GROQ_API_KEY"),
         openai_api_base="https://api.groq.com/openai/v1"
     )
+    image_tool = ImageSearchTool()
 
     # If hero exists but description is too short, update it
     if hero and (not hero.description or len(hero.description.split()) < 20):
         prompt = (
-            f"Answer the following question in 5-10 sentences: Who was {name}? "
-            f"Focus on their life, achievements, and why they are remembered. "
-            f"Also, provide a direct link to a public image of {name} (preferably from Wikipedia or Wikimedia Commons). "
-            f"Format your response as JSON with 'description' and 'picture_url' fields."
+            f"Write a detailed, engaging, and historically accurate 5-10 sentence description "
+            f"about {name}. Focus on their life, achievements, and why they are remembered."
         )
         try:
             response = llm.invoke(prompt)
-            try:
-                raw_json = extract_json_from_response(response.content)
-                if raw_json:
-                    data = json.loads(raw_json)
-                    description = data.get("description", "")
-                    picture_url = data.get("picture_url", "")
-                else:
-                    description = response.content
-                    picture_url = ""
-            except Exception as e:
-                description = response.content
-                picture_url = ""
+            description = response.content
+            # Use image search tool for the picture_url
+            picture_url = image_tool.run({"query": name, "max_results": 1})
+            if isinstance(picture_url, list):
+                picture_url = picture_url[0] if picture_url else ""
             hero.description = description
             hero.picture_url = picture_url
             db.add(hero)
             db.commit()
             db.close()
-            return {"answer": description, "picture_url": picture_url, "source": "groq", "hero": name}
+            return {"answer": description, "picture_url": picture_url, "source": "groq+tool", "hero": name}
         except Exception as e:
             db.close()
             return {"error": f"Failed to generate description for {name}: {e}"}
@@ -124,32 +117,22 @@ def hero_details(name: str = Query(..., description="Name of the hero")):
         db.close()
         return {"answer": hero.description, "picture_url": hero.picture_url, "source": "db", "hero": hero.name}
 
-    # If not found, use Groq LLM to generate
+    # If not found, use Groq LLM to generate description and tool for image
     prompt = (
-        f"Answer the following question in 5-10 sentences: Who was {name}? "
-        f"Focus on their life, achievements, and why they are remembered. "
-        f"Also, provide a direct link to a public image of {name} (preferably from Wikipedia or Wikimedia Commons). "
-        f"Format your response as JSON with 'description' and 'picture_url' fields."
+        f"Write a detailed, engaging, and historically accurate 5-10 sentence description "
+        f"about {name}. Focus on their life, achievements, and why they are remembered."
     )
     try:
         response = llm.invoke(prompt)
-        try:
-            raw_json = extract_json_from_response(response.content)
-            if raw_json:
-                data = json.loads(raw_json)
-                description = data.get("description", "")
-                picture_url = data.get("picture_url", "")
-            else:
-                description = response.content
-                picture_url = ""
-        except Exception as e:
-            description = response.content
-            picture_url = ""
+        description = response.content
+        picture_url = image_tool.run({"query": name, "max_results": 1})
+        if isinstance(picture_url, list):
+            picture_url = picture_url[0] if picture_url else ""
         new_hero = models.HistoricalFigure(name=name, description=description, picture_url=picture_url)
         db.add(new_hero)
         db.commit()
         db.close()
-        return {"answer": description, "picture_url": picture_url, "source": "groq", "hero": name}
+        return {"answer": description, "picture_url": picture_url, "source": "groq+tool", "hero": name}
     except Exception as e:
         db.close()
         return {"error": f"Failed to generate description for {name}: {e}"}
@@ -168,87 +151,66 @@ async def hero_trace(name: str = Query(..., description="Name of the hero")):
             openai_api_key=os.getenv("GROQ_API_KEY"),
             openai_api_base="https://api.groq.com/openai/v1"
         )
+        image_tool = ImageSearchTool()
         await asyncio.sleep(0.2)
         if hero and (not hero.description or len(hero.description.split()) < 20):
             yield "Found hero in DB, but description is too short. Calling Groq to upgrade description."
             prompt = (
-                f"Answer the following question in 5-10 sentences: Who was {name}? "
-                f"Focus on their life, achievements, and why they are remembered. "
-                f"Also, provide a direct link to a public image of {name} (preferably from Wikipedia or Wikimedia Commons). "
-                f"Format your response as JSON with 'description' and 'picture_url' fields."
+                f"Write a detailed, engaging, and historically accurate 5-10 sentence description "
+                f"about {name}. Focus on their life, achievements, and why they are remembered."
             )
             try:
                 yield "Calling Groq LLM..."
                 response = await asyncio.get_event_loop().run_in_executor(None, llm.invoke, prompt)
                 await asyncio.sleep(0.2)
-                try:
-                    raw_json = extract_json_from_response(response.content)
-                    if raw_json:
-                        data = json.loads(raw_json)
-                        description = data.get("description", "")
-                        picture_url = data.get("picture_url", "")
-                    else:
-                        description = response.content
-                        picture_url = ""
-                    trace.append("Parsed JSON response from Groq.")
-                except Exception:
-                    description = response.content
-                    picture_url = ""
-                    trace.append("Failed to parse JSON from Groq, using raw response.")
+                description = response.content
+                yield "Searching for image using image search tool..."
+                picture_url = await asyncio.get_event_loop().run_in_executor(None, image_tool.run, {"query": name, "max_results": 1})
+                if isinstance(picture_url, list):
+                    picture_url = picture_url[0] if picture_url else ""
                 hero.description = description
                 hero.picture_url = picture_url
                 db.add(hero)
                 db.commit()
                 db.close()
                 yield "Updated hero in DB with new description and picture_url."
-                yield f"FINAL_ANSWER::{json.dumps({'answer': description, 'picture_url': picture_url, 'source': 'groq', 'hero': name})}"
+                yield f"FINAL_ANSWER::" + json.dumps({"answer": description, "picture_url": picture_url, "source": "groq+tool", "hero": name})
                 return
             except Exception as e:
                 db.close()
                 yield f"Error: {e}"
-                yield f"FINAL_ANSWER::{json.dumps({'error': f'Failed to generate description for {name}: {e}'})}"
+                yield f"FINAL_ANSWER::" + json.dumps({"error": f"Failed to generate description for {name}: {e}"})
                 return
         if hero:
             db.close()
             yield "Found hero in DB with sufficient description."
-            yield f"FINAL_ANSWER::{json.dumps({'answer': hero.description, 'picture_url': hero.picture_url, 'source': 'db', 'hero': hero.name})}"
+            yield f"FINAL_ANSWER::" + json.dumps({"answer": hero.description, "picture_url": hero.picture_url, "source": "db", "hero": hero.name})
             return
-        yield "Hero not found in DB. Calling Groq to generate description and picture_url."
+        yield "Hero not found in DB. Generating description and searching for image."
         prompt = (
-            f"Answer the following question in 5-10 sentences: Who was {name}? "
-            f"Focus on their life, achievements, and why they are remembered. "
-            f"Also, provide a direct link to a public image of {name} (preferably from Wikipedia or Wikimedia Commons). "
-            f"Format your response as JSON with 'description' and 'picture_url' fields."
+            f"Write a detailed, engaging, and historically accurate 5-10 sentence description "
+            f"about {name}. Focus on their life, achievements, and why they are remembered."
         )
         try:
             yield "Calling Groq LLM..."
             response = await asyncio.get_event_loop().run_in_executor(None, llm.invoke, prompt)
             await asyncio.sleep(0.2)
-            try:
-                raw_json = extract_json_from_response(response.content)
-                if raw_json:
-                    data = json.loads(raw_json)
-                    description = data.get("description", "")
-                    picture_url = data.get("picture_url", "")
-                else:
-                    description = response.content
-                    picture_url = ""
-                trace.append("Parsed JSON response from Groq.")
-            except Exception:
-                description = response.content
-                picture_url = ""
-                trace.append("Failed to parse JSON from Groq, using raw response.")
+            description = response.content
+            yield "Searching for image using image search tool..."
+            picture_url = await asyncio.get_event_loop().run_in_executor(None, image_tool.run, {"query": name, "max_results": 1})
+            if isinstance(picture_url, list):
+                picture_url = picture_url[0] if picture_url else ""
             new_hero = models.HistoricalFigure(name=name, description=description, picture_url=picture_url)
             db.add(new_hero)
             db.commit()
             db.close()
             yield "Added new hero to DB."
-            yield f"FINAL_ANSWER::{json.dumps({'answer': description, 'picture_url': picture_url, 'source': 'groq', 'hero': name})}"
+            yield f"FINAL_ANSWER::" + json.dumps({"answer": description, "picture_url": picture_url, "source": "groq+tool", "hero": name})
             return
         except Exception as e:
             db.close()
             yield f"Error: {e}"
-            yield f"FINAL_ANSWER::{json.dumps({'error': f'Failed to generate description for {name}: {e}'})}"
+            yield f"FINAL_ANSWER::" + json.dumps({"error": f"Failed to generate description for {name}: {e}"})
             return
     return EventSourceResponse(event_generator())
 
