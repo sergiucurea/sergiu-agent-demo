@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hero Chat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .chat-box {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            width: 100%;
+            max-width: 500px;
+            padding: 24px 32px;
+            margin-bottom: 24px;
+        }
+        .messages {
+            min-height: 120px;
+            margin-bottom: 16px;
+        }
+        .user-msg {
+            text-align: right;
+            color: #2a4d69;
+            margin-bottom: 8px;
+        }
+        .bot-msg {
+            text-align: left;
+            color: #333;
+            background: #e6f0fa;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 8px;
+            display: inline-block;
+        }
+        .input-row {
+            display: flex;
+            width: 100%;
+        }
+        .input-row input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border-radius: 5px 0 0 5px;
+            border: 1px solid #ccc;
+            font-size: 1em;
+        }
+        .input-row button {
+            padding: 10px 20px;
+            border: none;
+            background: #2a4d69;
+            color: #fff;
+            border-radius: 0 5px 5px 0;
+            font-size: 1em;
+            cursor: pointer;
+        }
+        .input-row button:hover {
+            background: #1d3557;
+        }
+        .trace-card {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            width: 340px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: #111;
+            color: #39ff14;
+            font-family: 'Fira Mono', 'Consolas', monospace;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+            padding: 18px 20px;
+            z-index: 1000;
+            font-size: 1em;
+            line-height: 1.5;
+            border: 2px solid #39ff14;
+            letter-spacing: 0.02em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="trace-card" id="trace-card"></div>
+        <div class="chat-box">
+            <div class="messages" id="messages"></div>
+            <form id="chat-form" class="input-row">
+                <input type="text" id="user-input" placeholder="Ask about a hero..." autocomplete="off" required />
+                <button type="submit">Send</button>
+            </form>
+        </div>
+    </div>
+    <script>
+        const form = document.getElementById('chat-form');
+        const input = document.getElementById('user-input');
+        const messages = document.getElementById('messages');
+        const traceCard = document.getElementById('trace-card');
+
+        form.onsubmit = (e) => {
+            e.preventDefault();
+            const userMsg = input.value;
+            messages.innerHTML += `<div class='user-msg'>${userMsg}</div>`;
+            input.value = '';
+            messages.innerHTML += `<div class='bot-msg'>Thinking...</div>`;
+            messages.scrollTop = messages.scrollHeight;
+            traceCard.innerHTML = '';
+            const evtSource = new EventSource(`/hero_trace?name=${encodeURIComponent(userMsg)}`);
+            evtSource.onmessage = function(event) {
+                if (event.data.startsWith('FINAL_ANSWER::')) {
+                    messages.removeChild(messages.lastChild); // remove 'Thinking...'
+                    const data = JSON.parse(event.data.replace('FINAL_ANSWER::', ''));
+                    if (data.answer) {
+                        let msg = `<div class='bot-msg'>${data.answer}`;
+                        if (data.picture_url) {
+                            msg += `<br><img src='${data.picture_url}' alt='${data.hero}' style='max-width:200px; margin-top:10px;'>`;
+                        }
+                        msg += `</div>`;
+                        messages.innerHTML += msg;
+                    } else if (data.error) {
+                        messages.innerHTML += `<div class='bot-msg'>${data.error}</div>`;
+                    } else {
+                        messages.innerHTML += `<div class='bot-msg'>No answer found.</div>`;
+                    }
+                    evtSource.close();
+                } else {
+                    // Update trace card in real time
+                    traceCard.innerHTML += `&gt; ${event.data}<br>`;
+                    traceCard.scrollTop = traceCard.scrollHeight;
+                }
+            };
+            evtSource.onerror = function(err) {
+                messages.removeChild(messages.lastChild);
+                messages.innerHTML += `<div class='bot-msg'>Error: Could not connect to backend.`;
+                evtSource.close();
+            };
+        };
+    </script>
+</body>
+</html> 

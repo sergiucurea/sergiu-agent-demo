@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Historical Figures</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        h1 {
+            margin-top: 40px;
+            color: #333;
+        }
+        .hero-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            width: 100%;
+            max-width: 500px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin: 20px 0;
+            padding: 24px 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            transition: box-shadow 0.2s;
+        }
+        .card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.16);
+        }
+        .hero-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #2a4d69;
+            margin-bottom: 8px;
+        }
+        .hero-description {
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Historical Figures</h1>
+        <ul class="hero-list">
+            {% for hero in heroes %}
+                <li>
+                    <div class="card">
+                        <div class="hero-name">{{ hero.name }}</div>
+                        <div class="hero-description">{{ hero.description }}</div>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html> 

@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy
+alembic
+jinja2
+groq
+langchain
+langchain-community
+openai
+sse-starlette
+python-dotenv
